@@ -46,9 +46,8 @@ src/
   .vscode/
     c_cpp_properties.json
   server/
-    pages/
-      consumer_portal.py
-    admin_dashboard.py
+    dashboard.py
+    recovered_meter_data.csv
     server.py
   CaptivePortal.cpp
   CaptivePortal.h
@@ -67,10 +66,8 @@ src/
   StorageManager.h
 test/
   README
-.gitattributes
 .gitignore
 platformio.ini
-README.md
 recovered_meter_data.csv
 ````
 
@@ -242,90 +239,7 @@ More information about PlatformIO Library Dependency Finder
 }
 ````
 
-## File: src/server/pages/consumer_portal.py
-````python
-import streamlit as st
-import psycopg2
-import pandas as pd
-import time
-import warnings
-
-# ==========================================
-# 1. PAGE CONFIGURATION
-# ==========================================
-st.set_page_config(page_title="Utility Consumer Portal", page_icon="💳", layout="centered")
-
-st.title("💳 Utility Vending Portal")
-st.write("Welcome! Enter your Meter ID to securely check your balance and purchase units.")
-
-# ==========================================
-# 2. AUTHENTICATION & OVERVIEW
-# ==========================================
-meter_id = st.text_input("Enter Meter ID", value="1")
-
-if meter_id:
-    try:
-        # Connect to the PostgreSQL database
-        pg_conn = psycopg2.connect("dbname=smart_meter_db user=postgres password=Xav@2007ier host=localhost port=5432")
-        
-        # Query the specific meter
-        query = f"SELECT balance_ngn, total_kwh, tariff_rate FROM virtual_wallets WHERE device_id = {meter_id}"
-        
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            wallet_df = pd.read_sql_query(query, pg_conn)
-
-        if not wallet_df.empty:
-            current_balance = float(wallet_df.iloc[0]['balance_ngn'])
-            total_units = float(wallet_df.iloc[0]['total_kwh'])
-            tariff = float(wallet_df.iloc[0]['tariff_rate'])
-            
-            available_units = current_balance / tariff if tariff > 0 else 0.0
-
-            st.success(f"Meter ID {meter_id} Authenticated securely.")
-            
-            # --- ACCOUNT OVERVIEW ---
-            st.divider()
-            st.subheader("Account Overview")
-            
-            col1, col2 = st.columns(2)
-            col1.metric("Available Power", f"{available_units:.4f} kWh")
-            col2.metric("Wallet Balance", f"₦ {current_balance:,.2f}")
-            
-            st.caption(f"Lifetime Consumed: {total_units:.4f} kWh | Current Tariff: ₦{tariff}/kWh")
-            
-            # --- VENDING STATION ---
-            st.divider()
-            st.subheader("Top-Up Units")
-            
-            topup_amount = st.number_input("Amount (₦)", min_value=100.0, step=100.0, value=1000.0)
-            preview_units = topup_amount / tariff
-            
-            st.info(f"You are purchasing: **{preview_units:.2f} kWh**")
-            
-            if st.button("⚡ Proceed to Payment", type="primary", use_container_width=True):
-                # Process the transaction
-                vend_cursor = pg_conn.cursor()
-                vend_cursor.execute("UPDATE virtual_wallets SET balance_ngn = balance_ngn + %s WHERE device_id = %s", (topup_amount, meter_id))
-                pg_conn.commit()
-                vend_cursor.close()
-                
-                # Visual feedback
-                st.balloons()
-                st.success(f"Payment Successful! ₦{topup_amount:,.2f} has been added to Meter {meter_id}.")
-                time.sleep(2) # Give the user time to read the success message
-                st.rerun()
-                
-        else:
-            st.error("Meter ID not found in the utility database.")
-            
-        pg_conn.close()
-        
-    except Exception as e:
-        st.error(f"Database Connection Error: {e}")
-````
-
-## File: src/server/admin_dashboard.py
+## File: src/server/dashboard.py
 ````python
 import streamlit as st
 import time
@@ -342,7 +256,44 @@ import warnings
 st.set_page_config(page_title="Smart Meter Dashboard", layout="wide")
 
 # ==========================================
-# 2. MAIN DASHBOARD: STATE & SERVER
+# 2. SIDEBAR VENDING STATION
+# ==========================================
+with st.sidebar:
+    st.header("💳 Vending Station")
+    st.write("Simulate purchasing units via a payment gateway.")
+    
+    # Fetch tariff rate quickly for the preview
+    try:
+        temp_conn = psycopg2.connect("dbname=smart_meter_db user=postgres password=Xav@2007ier host=localhost port=5432")
+        temp_df = pd.read_sql_query("SELECT tariff_rate FROM virtual_wallets WHERE device_id = 1", temp_conn)
+        current_tariff = float(temp_df.iloc[0]['tariff_rate'])
+        temp_conn.close()
+    except Exception:
+        current_tariff = 225.0
+        
+    topup_amount = st.number_input("Top-Up Amount (₦)", min_value=100.0, step=100.0, value=1000.0)
+    preview_units = topup_amount / current_tariff
+    
+    st.info(f"Equivalent: **{preview_units:.2f} kWh** at ₦{current_tariff}/kWh")
+    
+    if st.button("🔌 Purchase Units", type="primary", use_container_width=True):
+        try:
+            vend_conn = psycopg2.connect("dbname=smart_meter_db user=postgres password=Xav@2007ier host=localhost port=5432")
+            vend_cursor = vend_conn.cursor()
+            # Add the top-up amount directly to the database balance
+            vend_cursor.execute("UPDATE virtual_wallets SET balance_ngn = balance_ngn + %s WHERE device_id = 1", (topup_amount,))
+            vend_conn.commit()
+            vend_cursor.close()
+            vend_conn.close()
+            
+            st.success(f"Successfully added ₦{topup_amount:,.2f}!")
+            time.sleep(1) # Let the user see the success message before refresh
+            st.rerun()
+        except Exception as e:
+            st.error(f"Transaction failed: {e}")
+
+# ==========================================
+# 3. MAIN DASHBOARD: STATE & SERVER
 # ==========================================
 st.title("⚡ PUF Smart Meter Live Telemetry")
 
@@ -407,23 +358,10 @@ with col_server:
             pass
         st.rerun()
 
-    if st.button("🔄 FORCE RESET WALLET (0 NGN)", type="primary"):
-        try:
-            reset_conn = psycopg2.connect("dbname=smart_meter_db user=postgres password=Xav@2007ier host=localhost port=5432")
-            reset_cursor = reset_conn.cursor()
-            reset_cursor.execute("UPDATE virtual_wallets SET balance_ngn = 0.0000, total_kwh = 0.0000 WHERE device_id = 1;")
-            reset_conn.commit()
-            reset_cursor.close()
-            reset_conn.close()
-            st.success("Wallet forcefully reset to ₦1,000.00 and 0 kWh!")
-        except Exception as e:
-            st.error(f"Reset failed: {e}")
-        st.rerun()
-
 st.divider()
 
 # ==========================================
-# 3. DATABASE FETCH & UI RENDERING
+# 4. DATABASE FETCH & UI RENDERING
 # ==========================================
 try:
     pg_conn = psycopg2.connect("dbname=smart_meter_db user=postgres password=Xav@2007ier host=localhost port=5432")
@@ -495,12 +433,14 @@ if not df.empty:
     col1, col2, col3 = st.columns(3)
     col1.metric("Live Voltage", f"{latest['voltage']:.4f} V")
     col2.metric("Live Current", f"{latest['current']:.4f} A")
+    # Simulate the heavy appliance multiplier visually on the dashboard
     simulated_power = latest['power'] * 1000000 
     col3.metric("Live Power (Simulated Load)", f"{simulated_power:.2f} W")
     
     st.divider()
     
     st.subheader("Power Consumption Over Time")
+    # Apply the same visual multiplier to the graph
     df['power'] = df['power'] * 1000000
     st.line_chart(df.set_index("recorded_at")["power"])
     
@@ -511,6 +451,62 @@ else:
 
 time.sleep(0.5)
 st.rerun()
+````
+
+## File: src/server/recovered_meter_data.csv
+````
+Timestamp,Voltage,Current,Power
+2026-08-10 12:00:05,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:10,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:15,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:20,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:25,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:30,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:36,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:41,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:46,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:51,4.998779,0.0005,0.0024993895
+2026-08-10 12:00:56,4.588623,0.0005,0.0022943115
+2026-08-10 12:01:01,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:06,4.888916,0.0005,0.002444458
+2026-08-10 12:01:12,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:17,4.949951,0.0005,0.0024749755
+2026-08-10 12:01:22,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:27,4.979248,0.0005,0.002489624
+2026-08-10 12:01:32,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:37,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:42,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:47,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:53,4.998779,0.0005,0.0024993895
+2026-08-10 12:01:58,4.998779,0.0005,0.0024993895
+2026-08-10 12:02:03,4.998779,0.0005,0.0024993895
+2026-08-10 12:02:08,4.87915,0.0005,0.0024395750000000003
+2026-08-10 12:02:13,4.731445,0.0005,0.0023657225
+2026-08-10 12:02:18,4.837646,0.0005,0.002418823
+2026-08-10 12:02:23,4.998779,0.0005,0.0024993895
+2026-08-10 12:02:29,4.837646,0.0005,0.002418823
+2026-08-10 12:02:34,4.93042,0.0005,0.00246521
+2026-08-10 12:02:39,4.998779,0.0005,0.0024993895
+2026-08-10 12:02:44,4.998779,0.0005,0.0024993895
+2026-08-10 12:02:49,4.898682,0.0005,0.002449341
+2026-08-10 12:02:54,4.969482,0.0005,0.002484741
+2026-08-10 12:03:00,4.783936,0.0005,0.002391968
+2026-08-10 12:03:05,4.898682,0.0005,0.002449341
+2026-08-10 12:03:34,4.998779,0.0005,0.0024993895
+2026-08-10 12:03:39,4.998779,0.0005,0.0024993895
+2026-08-10 12:03:44,4.998779,0.0005,0.0024993895
+2026-08-10 12:03:50,4.998779,0.0005,0.0024993895
+2026-08-10 12:03:55,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:00,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:05,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:10,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:16,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:21,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:26,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:31,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:36,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:41,4.998779,0.0005,0.0024993895
+2026-08-10 12:04:47,4.998779,0.0005,0.0024993895
 ````
 
 ## File: src/server/server.py
@@ -930,78 +926,46 @@ void loop() {
 #include "MeterLogic.h"
 
 const int POTENTIOMETER_PIN = 17;
-const int RELAY_PIN = 18; 
-const int BUZZER_PIN = 16;
 
-// Standard 5V relays are usually Active-Low, meaning LOW turns them ON.
-const int RELAY_ON = LOW; 
-const int RELAY_OFF = HIGH;
+// --- NEW: Virtual Relay State ---
+bool virtual_relay_active = true; 
+
+// We will keep the pin definition just in case you find an LED to use as a proxy
+const int PROXY_LED_PIN = 18; 
 
 int load_consumed;
 
 void setup_meter(){
-    setup_load();
-    
-    pinMode(RELAY_PIN, OUTPUT);
-    digitalWrite(RELAY_PIN, RELAY_OFF); // Default to off until server authorizes
-
-    pinMode(BUZZER_PIN, OUTPUT);
-    digitalWrite(BUZZER_PIN, LOW);      // Default buzzer silent
+  setup_load();
+  
+  pinMode(PROXY_LED_PIN, OUTPUT);
+  digitalWrite(PROXY_LED_PIN, HIGH); // Default to ON
 }
 
 void setup_load() {
-    pinMode(POTENTIOMETER_PIN, INPUT);
+  pinMode(POTENTIOMETER_PIN, INPUT);
 }
 
 float get_load_value(){
-    int sensorValue = analogRead(POTENTIOMETER_PIN);
-    float factor = (sensorValue / 4096.0);
-    return factor;
+  // --- THE VIRTUAL CUTOFF ---
+  if (!virtual_relay_active) {
+      return 0.0; // Force load to 0W if funds are exhausted
+  }
+  
+  int sensorValue = analogRead(POTENTIOMETER_PIN);
+  float factor = (sensorValue / 4096.0);
+  return factor;
 }
 
+// --- NEW: Actuation Function ---
 void update_relay(bool enable) {
-    if (enable) {
-        digitalWrite(RELAY_PIN, RELAY_ON);
-    } else {
-        digitalWrite(RELAY_PIN, RELAY_OFF);
-    }
-}
-
-void update_buzzer(float units, float balance, bool relay_is_on) {
-    unsigned long currentMillis = millis();
-    static int lastToneFreq = -1; // Tracks current state to prevent PWM resetting
-    int targetFreq = 0;
+    virtual_relay_active = enable;
     
-    if (balance <= 0.0 || !relay_is_on) {
-        // STATE 2: Fully Exhausted / Cutoff (Long pulsing alarm)
-        if ((currentMillis / 1200) % 2 == 0) {
-            targetFreq = 4000; // 4kHz piercing tone
-        } else {
-            targetFreq = 0;
-        }
-    } 
-    else if (units <= 2.0) {
-        // STATE 1: Low Balance Warning (<= 2 Units)
-        int intervalCycle = currentMillis % 5000;
-        if (intervalCycle < 200 || (intervalCycle > 400 && intervalCycle < 600)) {
-            targetFreq = 2500; // Warning pitch
-        } else {
-            targetFreq = 0;
-        }
-    } 
-    else {
-        // Normal Operation: Completely silent
-        targetFreq = 0;
-    }
-
-    // Only update the tone hardware when the target frequency changes
-    if (targetFreq != lastToneFreq) {
-        if (targetFreq > 0) {
-            tone(BUZZER_PIN, targetFreq);
-        } else {
-            noTone(BUZZER_PIN);
-        }
-        lastToneFreq = targetFreq;
+    // If you have a standard LED, it will turn off when funds run out
+    if (enable) {
+        digitalWrite(PROXY_LED_PIN, HIGH);
+    } else {
+        digitalWrite(PROXY_LED_PIN, LOW);
     }
 }
 ````
@@ -1016,7 +980,6 @@ void setup_meter();
 void setup_load();
 
 float get_load_value();
-void update_buzzer(float units, float balance, bool relay_is_on);
 ````
 
 ## File: src/NetworkingModule.cpp
@@ -2333,7 +2296,13 @@ More information about PlatformIO Unit Testing:
 [env:esp32-s3-devkitc-1]
 platform = espressif32
 board = esp32-s3-devkitc-1
-framework = espidf
+framework = arduino
+board_build.filesystem = littlefs 
+lib_deps = 
+    marcoschwartz/LiquidCrystal_I2C@^1.1.4
+    bblanchon/ArduinoJson
+    makuna/RTC
+monitor_speed=115200
 ````
 
 ## File: recovered_meter_data.csv
@@ -4126,15 +4095,4 @@ Timestamp,Voltage,Current,Power
 2026-08-12 22:40:54,0.084229,0.0005,4.21145e-05
 2026-08-12 22:41:00,0.072021,0.0005,3.6010500000000004e-05
 2026-08-12 22:41:05,0.081787,0.0005,4.08935e-05
-````
-
-## File: .gitattributes
-````
-# Auto detect text files and perform LF normalization
-* text=auto
-````
-
-## File: README.md
-````markdown
-# PUF-Secured Smart Meter
 ````
