@@ -15,7 +15,7 @@ st.set_page_config(page_title="Smart Meter Dashboard", layout="wide")
 # ==========================================
 # 2. MAIN DASHBOARD: STATE & SERVER
 # ==========================================
-st.title("⚡ PUF Smart Meter Live Telemetry")
+st.title("⚡ Smart Meter Dashboard")
 
 if 'last_packet_time' not in st.session_state:
     st.session_state.last_packet_time = None
@@ -66,7 +66,7 @@ with col_server:
             st.rerun()
             
     st.write("") 
-    if st.button("🧹 WIPE DATABASE (FIX GHOST DATA)", type="secondary"):
+    if st.button("🧹 WIPE DATABASE", type="secondary"):
         try:
             wipe_conn = psycopg2.connect("dbname=smart_meter_db user=postgres password=Xav@2007ier host=localhost port=5432")
             wipe_cursor = wipe_conn.cursor()
@@ -162,7 +162,7 @@ if not df.empty:
 
     st.divider()
     
-    st.subheader("Live Electrical Telemetry")
+    st.subheader("Live Electrical Reading")
     col1, col2, col3 = st.columns(3)
     col1.metric("Live Voltage", f"{latest['voltage']:.4f} V")
     col2.metric("Live Current", f"{latest['current']:.4f} A")
@@ -175,10 +175,10 @@ if not df.empty:
     df['power'] = df['power'] * 1000000
     st.line_chart(df.set_index("recorded_at")["power"])
     
-    st.subheader("Raw Telemetry & Audit Log")
+    st.subheader("Tabulated Meter Data")
     st.dataframe(df.tail(10), width="stretch")
 else:
-    st.warning("Waiting for telemetry data... Is the ESP32 online?")
+    st.warning("Waiting for meter readings... Is the ESP32 online?")
 
 time.sleep(0.5)
 st.rerun()

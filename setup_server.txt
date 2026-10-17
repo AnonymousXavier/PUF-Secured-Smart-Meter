@@ -1,0 +1,41 @@
+======================================================
+DEMONSTRATION STARTUP CHECKLIST: PUF SMART METER
+======================================================
+
+1. START THE BACKEND (TELEMETRY RECEIVER)
+   - Open Command Prompt.
+   - Navigate to the project folder:
+     cd C:\Users\New\Documents\Arduino\ESP32\Final Year Project\PUF-Secured Smart Meter\src\server
+   - Run: python server.py
+   - Expected Output: "Cloud Server Listening On Port 7556..."
+
+2. START THE FRONTEND (USER INTERFACE)
+   - Open a SECOND Command Prompt in the same folder.
+   - Run: streamlit run admin_dashboard.py
+   - Expected Result: The dashboard opens in your web browser.
+
+3. START THE TUNNEL (PLAY.GG)
+   - Open a THIRD Command Prompt.
+   - Run: playit
+   - Look under "Tunnels" to find your active domain and port.
+     (e.g., jacobs-snooker.tun.ply.gg:48178)
+
+4. GET THE RAW IP ADDRESS
+   - Open a FOURTH Command Prompt (or just use a new tab).
+   - Ping the domain to get the numbers:
+     ping jacobs-snooker.tun.ply.gg
+   - Note the raw IP (usually 147.185.221.231) and your specific 5-digit port.
+
+5. CONFIGURE THE ESP32
+   - Power on the ESP32 prototype.
+   - Connect your phone/laptop to the "Smart Meter" Wi-Fi network.
+   - When the Captive Portal page appears, enter:
+     * Target Server IP: 147.185.221.231
+     * Target Port: 48178 (or whatever port Playit just generated)
+   - Click "UPDATE FIRMWARE".
+
+6. VERIFY SYSTEM IS LIVE
+   - Check the Streamlit Dashboard.
+   - Status should change to "METER CONNECTED".
+   - Proceed with the live appliance load-shedding demonstration.
+======================================================
